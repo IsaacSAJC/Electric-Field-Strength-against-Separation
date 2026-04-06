@@ -31,17 +31,17 @@ export default function App() {
 
   // Physics Calculations
   const getE1 = (x: number) => {
-    if (x < r1 || x > d - r2) return 0;
+    if (x < r1 - 1e-6 || x > d - r2 + 1e-6) return 0;
     return (K * q1 * 1e-9) / (x * x);
   };
 
   const getE2 = (x: number) => {
-    if (x < r1 || x > d - r2) return 0;
+    if (x < r1 - 1e-6 || x > d - r2 + 1e-6) return 0;
     return (-K * q2 * 1e-9) / ((d - x) * (d - x));
   };
 
   const getEnet = (x: number) => {
-    if (x < r1 || x > d - r2) return 0;
+    if (x < r1 - 1e-6 || x > d - r2 + 1e-6) return 0;
     return getE1(x) + getE2(x);
   };
 
@@ -53,26 +53,29 @@ export default function App() {
   // Graph Data Generation
   const graphData = useMemo(() => {
     const points = [];
-    const steps = 500; // Increased steps for better minimum finding
-    let maxY = 0;
+    const steps = 800; // Increased steps for smoother curves
     let minAbsEnet = Infinity;
     let minEnetPoint = { x: 0, enet: 0 };
 
+    const xValues = new Set<number>();
     for (let i = 0; i <= steps; i++) {
-      const x = (i / steps) * d;
+      xValues.add((i / steps) * d);
+    }
+    // Explicitly add boundaries to ensure curve reaches the edges perfectly
+    xValues.add(r1);
+    xValues.add(d - r2);
+
+    const sortedX = Array.from(xValues).sort((a, b) => a - b);
+
+    for (const x of sortedX) {
       const e1 = getE1(x);
       const e2 = getE2(x);
       const enet = getEnet(x);
       
       points.push({ x, e1, e2, enet });
 
-      // Calculate max Y based on the middle 80% of the distance between spheres
-      if (x > r1 + (d - r1 - r2) * 0.1 && x < d - r2 - (d - r1 - r2) * 0.1) {
-        maxY = Math.max(maxY, Math.abs(e1), Math.abs(e2), Math.abs(enet));
-      }
-
       // Find minimum absolute Enet between spheres
-      if (x > r1 && x < d - r2) {
+      if (x >= r1 - 1e-6 && x <= d - r2 + 1e-6) {
         if (Math.abs(enet) < minAbsEnet) {
           minAbsEnet = Math.abs(enet);
           minEnetPoint = { x, enet };
@@ -80,20 +83,31 @@ export default function App() {
       }
     }
 
+    // Calculate exact boundary values to ensure graph fits perfectly
+    const e1_r1 = (K * q1 * 1e-9) / (r1 * r1);
+    const e2_r1 = (-K * q2 * 1e-9) / ((d - r1) * (d - r1));
+    const enet_r1 = e1_r1 + e2_r1;
+
+    const e1_r2 = (K * q1 * 1e-9) / ((d - r2) * (d - r2));
+    const e2_r2 = (-K * q2 * 1e-9) / (r2 * r2);
+    const enet_r2 = e1_r2 + e2_r2;
+
+    let maxY = Math.max(
+      Math.abs(e1_r1), Math.abs(e2_r1), Math.abs(enet_r1),
+      Math.abs(e1_r2), Math.abs(e2_r2), Math.abs(enet_r2)
+    );
+
     // Add a bit of padding to the max Y
-    maxY = maxY === 0 ? 1000 : maxY * 1.2;
+    maxY = maxY === 0 ? 1000 : maxY * 1.1;
 
-    // Calculate max Enet at the surfaces
-    const maxEnetR1 = getEnet(r1 + 0.0001); // slightly outside to get value
-    const maxEnetR2 = getEnet(d - r2 - 0.0001);
-
-    return { points, maxY, minEnetPoint, maxEnetR1, maxEnetR2 };
+    return { points, maxY, minEnetPoint, maxEnetR1: enet_r1, maxEnetR2: enet_r2 };
   }, [q1, q2, d, r1, r2]);
 
   // SVG Graph Configuration
-  const svgWidth = 800;
-  const svgHeight = 300;
-  const padding = { top: 20, right: 20, bottom: 40, left: 80 };
+  const svgWidth = 1000;
+  const svgHeight = 400;
+  const vectorSvgHeight = 160;
+  const padding = { top: 20, right: 40, bottom: 40, left: 100 };
   const plotWidth = svgWidth - padding.left - padding.right;
   const plotHeight = svgHeight - padding.top - padding.bottom;
 
@@ -107,7 +121,7 @@ export default function App() {
   // Generate SVG Paths
   const generatePath = (key: 'e1' | 'e2' | 'enet') => {
     // Only draw paths outside the spheres to show curves starting/ending at surfaces
-    const validPoints = graphData.points.filter(p => p.x >= r1 && p.x <= d - r2);
+    const validPoints = graphData.points.filter(p => p.x >= r1 - 1e-6 && p.x <= d - r2 + 1e-6);
     if (validPoints.length === 0) return '';
     return validPoints
       .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xToSvg(p.x)} ${yToSvg(p[key])}`)
@@ -123,7 +137,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Header */}
         <header className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -138,16 +152,28 @@ export default function App() {
           </p>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="space-y-6">
           
-          {/* Controls Sandbox */}
-          <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-6">
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-              <Settings2 size={20} className="text-slate-500" />
-              <h2 className="text-lg font-semibold text-slate-800">Sandbox Controls</h2>
+          {/* Interactive Sandbox (Vector + Controls) */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Settings2 size={20} className="text-slate-500" />
+                <h2 className="text-lg font-semibold text-slate-800">1D Vector Visualization & Controls</h2>
+              </div>
+              <button
+                onClick={() => setShowComponents(!showComponents)}
+                className="flex items-center gap-2 py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition-colors border border-slate-200"
+              >
+                {showComponents ? <EyeOff size={16} /> : <Eye size={16} />}
+                <span className="text-sm font-medium">
+                  {showComponents ? "Hide Components" : "Show Components"}
+                </span>
+              </button>
             </div>
 
-            <div className="space-y-4">
+            {/* Controls Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
               {/* Q1 Control */}
               <div className="space-y-2">
                 <div className="flex justify-between">
@@ -158,8 +184,8 @@ export default function App() {
                 </div>
                 <input
                   type="range"
-                  min="-20"
-                  max="20"
+                  min="-200"
+                  max="200"
                   step="0.1"
                   value={q1}
                   onChange={(e) => setQ1(parseFloat(e.target.value))}
@@ -177,8 +203,8 @@ export default function App() {
                 </div>
                 <input
                   type="range"
-                  min="-20"
-                  max="20"
+                  min="-200"
+                  max="200"
                   step="0.1"
                   value={q2}
                   onChange={(e) => setQ2(parseFloat(e.target.value))}
@@ -195,8 +221,8 @@ export default function App() {
                 <input
                   type="range"
                   min="0.04"
-                  max="0.15"
-                  step="0.01"
+                  max="0.20"
+                  step="0.001"
                   value={d}
                   onChange={(e) => {
                     const newD = parseFloat(e.target.value);
@@ -218,8 +244,8 @@ export default function App() {
                 </div>
                 <input
                   type="range"
-                  min="0.005"
-                  max={d - r2 - 0.001}
+                  min="0.01"
+                  max={Math.min(0.05, d - r2 - 0.001)}
                   step="0.001"
                   value={r1}
                   onChange={(e) => setR1(parseFloat(e.target.value))}
@@ -235,8 +261,8 @@ export default function App() {
                 </div>
                 <input
                   type="range"
-                  min="0.005"
-                  max={d - r1 - 0.001}
+                  min="0.01"
+                  max={Math.min(0.05, d - r1 - 0.001)}
                   step="0.001"
                   value={r2}
                   onChange={(e) => setR2(parseFloat(e.target.value))}
@@ -244,30 +270,12 @@ export default function App() {
                 />
               </div>
 
-              {/* Toggle Components */}
-              <div className="pt-4 border-t border-slate-100">
-                <button
-                  onClick={() => setShowComponents(!showComponents)}
-                  className="flex items-center gap-2 w-full justify-center py-2 px-4 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition-colors border border-slate-200"
-                >
-                  {showComponents ? <EyeOff size={18} /> : <Eye size={18} />}
-                  <span className="text-sm font-medium">
-                    {showComponents ? "Hide Individual Fields" : "Show Individual Fields"}
-                  </span>
-                </button>
-              </div>
             </div>
-          </div>
 
-          {/* Visualization & Graph */}
-          <div className="lg:col-span-2 space-y-6">
-            
             {/* 1D Vector Visualization */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-6">1D Vector Visualization</h2>
-              
-              <div className="relative h-32 w-full select-none">
-                <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="xMidYMid meet" className="overflow-visible">
+            <div className="pt-6 border-t border-slate-100">
+              <div className="relative w-full select-none">
+                <svg width="100%" viewBox={`0 0 ${svgWidth} ${vectorSvgHeight}`} preserveAspectRatio="xMidYMid meet" className="overflow-hidden rounded-lg">
                   <defs>
                     <marker id="arrow-enet" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                       <path d="M 0 0 L 10 5 L 0 10 z" fill="#1e293b" />
@@ -281,33 +289,33 @@ export default function App() {
                   </defs>
 
                   {/* Main Axis Line */}
-                  <line x1="10" y1="20" x2="90" y2="20" stroke="#cbd5e1" strokeWidth="0.5" strokeDasharray="1 1" />
+                  <line x1={padding.left - 20} y1={vectorSvgHeight / 2} x2={svgWidth - padding.right + 20} y2={vectorSvgHeight / 2} stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4 4" />
                   
                   {/* Distance Indicator */}
-                  <line x1="10" y1="32" x2="90" y2="32" stroke="#94a3b8" strokeWidth="0.25" />
-                  <line x1="10" y1="30" x2="10" y2="34" stroke="#94a3b8" strokeWidth="0.25" />
-                  <line x1="90" y1="30" x2="90" y2="34" stroke="#94a3b8" strokeWidth="0.25" />
-                  <text x="50" y="38" textAnchor="middle" className="text-[4px] fill-slate-500">{d.toFixed(3)} m</text>
+                  <line x1={xToSvg(0)} y1={vectorSvgHeight - 20} x2={xToSvg(d)} y2={vectorSvgHeight - 20} stroke="#94a3b8" strokeWidth="1" />
+                  <line x1={xToSvg(0)} y1={vectorSvgHeight - 25} x2={xToSvg(0)} y2={vectorSvgHeight - 15} stroke="#94a3b8" strokeWidth="1" />
+                  <line x1={xToSvg(d)} y1={vectorSvgHeight - 25} x2={xToSvg(d)} y2={vectorSvgHeight - 15} stroke="#94a3b8" strokeWidth="1" />
+                  <text x={padding.left + plotWidth / 2} y={vectorSvgHeight - 5} textAnchor="middle" className="text-sm fill-slate-500">{d.toFixed(3)} m</text>
 
                   {/* Charge R */}
-                  <circle cx="10" cy="20" r={(r1 / d) * 80} className={cn(q1 > 0 ? "fill-red-100 stroke-red-500" : q1 < 0 ? "fill-blue-100 stroke-blue-500" : "fill-slate-100 stroke-slate-500")} strokeWidth="0.5" />
-                  <text x="10" y="20" textAnchor="middle" dominantBaseline="central" className="text-[4px] font-bold fill-slate-700">{q1 > 0 ? '+' : q1 < 0 ? '-' : '0'}</text>
-                  <text x="10" y="8" textAnchor="middle" className="text-[4px] font-semibold fill-slate-600">R</text>
+                  <circle cx={xToSvg(0)} cy={vectorSvgHeight / 2} r={(r1 / d) * plotWidth} className={cn(q1 > 0 ? "fill-red-100 stroke-red-500" : q1 < 0 ? "fill-blue-100 stroke-blue-500" : "fill-slate-100 stroke-slate-500")} strokeWidth="2" />
+                  <text x={xToSvg(0)} y={vectorSvgHeight / 2} textAnchor="middle" dominantBaseline="central" className="text-lg font-bold fill-slate-700">{q1 > 0 ? '+' : q1 < 0 ? '-' : '0'}</text>
+                  <text x={xToSvg(0)} y={vectorSvgHeight / 2 - ((r1 / d) * plotWidth) - 10} textAnchor="middle" className="text-sm font-semibold fill-slate-600">R</text>
 
                   {/* Charge S */}
-                  <circle cx="90" cy="20" r={(r2 / d) * 80} className={cn(q2 > 0 ? "fill-red-100 stroke-red-500" : q2 < 0 ? "fill-blue-100 stroke-blue-500" : "fill-slate-100 stroke-slate-500")} strokeWidth="0.5" />
-                  <text x="90" y="20" textAnchor="middle" dominantBaseline="central" className="text-[4px] font-bold fill-slate-700">{q2 > 0 ? '+' : q2 < 0 ? '-' : '0'}</text>
-                  <text x="90" y="8" textAnchor="middle" className="text-[4px] font-semibold fill-slate-600">S</text>
+                  <circle cx={xToSvg(d)} cy={vectorSvgHeight / 2} r={(r2 / d) * plotWidth} className={cn(q2 > 0 ? "fill-red-100 stroke-red-500" : q2 < 0 ? "fill-blue-100 stroke-blue-500" : "fill-slate-100 stroke-slate-500")} strokeWidth="2" />
+                  <text x={xToSvg(d)} y={vectorSvgHeight / 2} textAnchor="middle" dominantBaseline="central" className="text-lg font-bold fill-slate-700">{q2 > 0 ? '+' : q2 < 0 ? '-' : '0'}</text>
+                  <text x={xToSvg(d)} y={vectorSvgHeight / 2 - ((r2 / d) * plotWidth) - 10} textAnchor="middle" className="text-sm font-semibold fill-slate-600">S</text>
 
                   {/* Vectors at Probe */}
                   {(() => {
-                    const px = 10 + (probeX / d) * 80;
-                    const maxVectorLength = 25;
+                    const px = xToSvg(probeX);
+                    const maxVectorLength = 100;
                     
                     // Scale vectors relative to the max Y of the graph
                     const scale = (val: number) => {
                       if (!isFinite(val)) return 0;
-                      const scaled = (val / graphData.maxY) * 15;
+                      const scaled = (val / graphData.maxY) * 60;
                       return Math.max(-maxVectorLength, Math.min(maxVectorLength, scaled));
                     };
 
@@ -318,20 +326,20 @@ export default function App() {
                     return (
                       <g>
                         {/* E1 Vector */}
-                        {showComponents && Math.abs(v1) > 0.5 && (
-                          <line x1={px} y1="16" x2={px + v1} y2="16" stroke="#ef4444" strokeWidth="0.5" markerEnd="url(#arrow-e1)" />
+                        {showComponents && Math.abs(v1) > 1 && (
+                          <line x1={px} y1={vectorSvgHeight / 2 - 15} x2={px + v1} y2={vectorSvgHeight / 2 - 15} stroke="#ef4444" strokeWidth="2" markerEnd="url(#arrow-e1)" />
                         )}
                         {/* E2 Vector */}
-                        {showComponents && Math.abs(v2) > 0.5 && (
-                          <line x1={px} y1="24" x2={px + v2} y2="24" stroke="#3b82f6" strokeWidth="0.5" markerEnd="url(#arrow-e2)" />
+                        {showComponents && Math.abs(v2) > 1 && (
+                          <line x1={px} y1={vectorSvgHeight / 2 + 15} x2={px + v2} y2={vectorSvgHeight / 2 + 15} stroke="#3b82f6" strokeWidth="2" markerEnd="url(#arrow-e2)" />
                         )}
                         {/* Enet Vector */}
-                        {Math.abs(vNet) > 0.5 && (
-                          <line x1={px} y1="20" x2={px + vNet} y2="20" stroke="#1e293b" strokeWidth="0.75" markerEnd="url(#arrow-enet)" />
+                        {Math.abs(vNet) > 1 && (
+                          <line x1={px} y1={vectorSvgHeight / 2} x2={px + vNet} y2={vectorSvgHeight / 2} stroke="#1e293b" strokeWidth="3" markerEnd="url(#arrow-enet)" />
                         )}
                         
                         {/* Probe Dot */}
-                        <circle cx={px} cy="20" r="1.5" className="fill-amber-400 stroke-white" strokeWidth="0.5" />
+                        <circle cx={px} cy={vectorSvgHeight / 2} r="6" className="fill-amber-400 stroke-white" strokeWidth="2" />
                       </g>
                     );
                   })()}
@@ -377,13 +385,14 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Graph */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          {/* Graph */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
               <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Electric Field vs Distance</h2>
               
-              <div className="relative w-full overflow-hidden" style={{ height: svgHeight }}>
-                <svg width="100%" height="100%" viewBox={`0 0 ${svgWidth} ${svgHeight}`} preserveAspectRatio="none">
+              <div className="relative w-full overflow-hidden">
+                <svg width="100%" viewBox={`0 0 ${svgWidth} ${svgHeight}`} preserveAspectRatio="xMidYMid meet">
                   
                   {/* Shaded Regions for Spheres */}
                   <rect x={padding.left} y={padding.top} width={xToSvg(r1) - padding.left} height={plotHeight} fill="#f1f5f9" opacity="0.5" />
@@ -515,6 +524,5 @@ export default function App() {
           </div>
         </div>
       </div>
-    </div>
   );
 }
